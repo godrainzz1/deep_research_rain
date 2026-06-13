@@ -198,7 +198,6 @@ deep-research/
 ├── README.md
 ├── CLAUDE.md
 ├── .gitignore
-├── report.md                       # RAG 测试用文件
 ├── backend/
 │   ├── .env.example                # 配置模板
 │   ├── pyproject.toml
