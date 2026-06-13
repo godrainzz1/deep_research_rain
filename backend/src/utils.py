@@ -19,11 +19,24 @@ def get_config_value(value: Any) -> str:
 def strip_thinking_tokens(text: str) -> str:
     """Remove ``<think>`` sections from model responses."""
 
+    # Paired <think>...</think>
     while "<think>" in text and "</think>" in text:
         start = text.find("<think>")
         end = text.find("</think>") + len("</think>")
-        text = text[:start] + text[end:]
-    return text
+        if end > start:
+            text = text[:start] + text[end:]
+        else:
+            break
+
+    # Orphaned </think> without opening tag — strip prefix
+    orphan = text.find("</think>")
+    if orphan != -1 and "<think>" not in text[:orphan]:
+        text = text[orphan + len("</think>"):]
+
+    # Also strip plain <think> and </think> tags as safety net
+    text = text.replace("<think>", "").replace("</think>", "")
+
+    return text.strip()
 
 
 def deduplicate_and_format_sources(

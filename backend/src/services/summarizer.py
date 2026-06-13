@@ -59,7 +59,15 @@ class SummarizationService:
         def flush_visible() -> Iterator[str]:
             nonlocal emit_index, raw_buffer
             while True:
-                start = raw_buffer.find("<think>", emit_index)
+                # Handle orphaned </think> (no preceding <think>): skip everything before it
+                orphan_end = raw_buffer.find("</think>", emit_index)
+                think_start = raw_buffer.find("<think>", emit_index)
+                if orphan_end != -1 and (think_start == -1 or orphan_end < think_start):
+                    # Orphaned </think> — discard everything up to and including it
+                    emit_index = orphan_end + len("</think>")
+                    continue
+
+                start = think_start
                 if start == -1:
                     if emit_index < len(raw_buffer):
                         segment = raw_buffer[emit_index:]
@@ -87,8 +95,10 @@ class SummarizationService:
                     if remove_thinking:
                         for segment in flush_visible():
                             visible_output += segment
-                            if segment:
-                                yield segment
+                            # Second safety net: strip any remaining think tags inline
+                            clean = segment.replace("<think>", "").replace("</think>", "")
+                            if clean.strip():
+                                yield clean
                     else:
                         visible_output += chunk
                         if chunk:
@@ -97,8 +107,9 @@ class SummarizationService:
                 if remove_thinking:
                     for segment in flush_visible():
                         visible_output += segment
-                        if segment:
-                            yield segment
+                        clean = segment.replace("<think>", "").replace("</think>", "")
+                        if clean.strip():
+                            yield clean
                 agent.clear_history()
 
         def get_summary() -> str:
