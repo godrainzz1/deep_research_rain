@@ -1,0 +1,5 @@
+/* App-level layout — design tokens are in styles/tokens.css */
+
+#app {
+  min-height: 100vh;
+}
