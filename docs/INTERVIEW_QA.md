@@ -238,6 +238,10 @@
 
 ---
 
+### Q16b：如何保证 LLM 输出的任务总结格式统一？
+
+> 双层保障。第一层是 Prompt 模板强制要求统一结构。第二层是 Pydantic 硬约束：summary_schema.py 的 normalize_summary() 用正则解析 LLM 输出的每条发现（标题/含义与价值/多维度拓展），然后用 Pydantic 重建为标准 Markdown。解析失败则保留原文兜底。Prompt 是建议，Pydantic 是执行。
+
 ## 七、SSE 流式推送
 
 ### Q28：为什么用 SSE 而不是 WebSocket？ ⭐
