@@ -25,13 +25,6 @@ from services.reporter import ReportingService
 from services.search import dispatch_search, prepare_research_context
 from services.summarizer import SummarizationService
 from services.tool_events import ToolCallTracker
-from services.pipeline import (
-    ResearchMode,
-    ResearchPipeline,
-    build_standard_pipeline,
-    build_quick_pipeline,
-    build_deep_pipeline,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +145,6 @@ class DeepResearchAgent:
         self.reporting = ReportingService(self.report_agent, self.config)
         self._last_search_notices: list[str] = []
 
-        # 构建研究管道（标准模式）
-        self._pipeline = self._build_pipeline(ResearchMode.STANDARD)
-
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -238,63 +228,6 @@ class DeepResearchAgent:
 
         return FallbackLLM(primary, fallback)
 
-    # ------------------------------------------------------------------
-    # Pipeline
-    # ------------------------------------------------------------------
-
-    def _build_pipeline(self, mode: ResearchMode = ResearchMode.STANDARD) -> ResearchPipeline:
-        """Assemble the research pipeline from the configured mode."""
-
-        if mode == ResearchMode.QUICK:
-            return build_quick_pipeline(
-                search_fn=self._pipeline_quick_search,
-                summarizer_fn=self._pipeline_quick_summarize,
-                report_fn=self._pipeline_quick_report,
-            )
-        if mode == ResearchMode.DEEP:
-            return build_deep_pipeline(
-                planner_fn=self.planner.plan_todo_list,
-                executor_fn=self._execute_task,
-                verifier_fn=self._pipeline_verify,
-                report_fn=self.reporting.generate_report,
-            )
-        return build_standard_pipeline(
-            planner_fn=self.planner.plan_todo_list,
-            executor_fn=self._execute_task,
-            report_fn=self.reporting.generate_report,
-        )
-
-    # -- quick-mode callbacks --------------------------------------------------
-
-    def _pipeline_quick_search(self, ctx: Any) -> None:
-        """Quick mode: search directly without task planning."""
-        from models import TodoItem
-
-        task = TodoItem(
-            id=1,
-            title=f"快速研究: {ctx.topic}",
-            intent=f"快速了解「{ctx.topic}」的核心信息",
-            query=ctx.topic,
-            status="pending",
-        )
-        self._execute_task(ctx.state, task, emit_stream=False)
-        ctx.state.todo_items = [task]
-
-    def _pipeline_quick_summarize(self, ctx: Any) -> None:
-        """Quick mode summary is already done during search; no-op here."""
-
-    def _pipeline_quick_report(self, ctx: Any) -> str:
-        """Quick mode: generate a concise report."""
-        return self.reporting.generate_report(ctx.state)
-
-    def _pipeline_verify(self, state: Any) -> None:
-        """Deep-mode cross verification stub (implemented in later step)."""
-        logger.info("Deep verification requested but not yet implemented — skipping.")
-
-    # ------------------------------------------------------------------
-    # Agent factory
-    # ------------------------------------------------------------------
-
     def _create_tool_aware_agent(
         self,
         *,
@@ -370,7 +303,7 @@ class DeepResearchAgent:
             todo_items=state.todo_items,
         )
 
-    def run_stream(self, topic: str, mode: ResearchMode | None = None) -> Iterator[dict[str, Any]]:
+    def run_stream(self, topic: str) -> Iterator[dict[str, Any]]:
         """Execute the workflow yielding incremental progress events."""
         state = SummaryState(research_topic=topic)
         logger.info("Starting streaming research: topic=%s", topic)

@@ -1,4 +1,4 @@
-"""Composable research pipeline — quick / standard / deep."""
+"""Composable research pipeline stage framework."""
 
 from __future__ import annotations
 
@@ -70,18 +70,11 @@ class PipelineStage(ABC):
 # Pipeline orchestrator
 # ---------------------------------------------------------------------------
 
-class ResearchMode(Enum):
-    QUICK = "quick"
-    STANDARD = "standard"
-    DEEP = "deep"
-
-
 class ResearchPipeline:
     """Runs a list of stages in order, passing a shared ResearchContext."""
 
-    def __init__(self, stages: list[PipelineStage], mode: ResearchMode = ResearchMode.STANDARD) -> None:
+    def __init__(self, stages: list[PipelineStage]) -> None:
         self.stages = stages
-        self.mode = mode
 
     def run(self, topic: str) -> ResearchContext:
         """Synchronous execution."""
@@ -97,7 +90,7 @@ class ResearchPipeline:
     def run_stream(self, topic: str) -> Iterator[dict[str, Any]]:
         """Streaming execution — each stage yields SSE events."""
         ctx = ResearchContext(topic=topic)
-        yield {"type": "status", "message": f"研究模式: {self.mode.value} · {len(self.stages)} 个阶段"}
+        yield {"type": "status", "message": f"管道启动: {len(self.stages)} 个阶段"}
         for stage in self.stages:
             if ctx.abort:
                 break
@@ -112,61 +105,7 @@ class ResearchPipeline:
 
 
 # ---------------------------------------------------------------------------
-# Preset factories
-# ---------------------------------------------------------------------------
-
-def build_quick_pipeline(
-    search_fn: Callable,
-    summarizer_fn: Callable,
-    report_fn: Callable,
-) -> ResearchPipeline:
-    """Single-round search → summarise → report (fast, ~30 s)."""
-    return ResearchPipeline(
-        stages=[
-            _QuickSearchStage(search_fn),
-            _QuickSummarizeStage(summarizer_fn),
-            _QuickReportStage(report_fn),
-        ],
-        mode=ResearchMode.QUICK,
-    )
-
-
-def build_standard_pipeline(
-    planner_fn: Callable,
-    executor_fn: Callable,
-    report_fn: Callable,
-) -> ResearchPipeline:
-    """Plan → per-task search+summarise → report (current default, ~2-5 min)."""
-    return ResearchPipeline(
-        stages=[
-            _PlanStage(planner_fn),
-            _ExecuteTasksStage(executor_fn),
-            _ReportStage(report_fn),
-        ],
-        mode=ResearchMode.STANDARD,
-    )
-
-
-def build_deep_pipeline(
-    planner_fn: Callable,
-    executor_fn: Callable,
-    verifier_fn: Callable,
-    report_fn: Callable,
-) -> ResearchPipeline:
-    """Plan → execute → cross-verify → report (thorough, ~5-10 min)."""
-    return ResearchPipeline(
-        stages=[
-            _PlanStage(planner_fn),
-            _ExecuteTasksStage(executor_fn),
-            _VerifyStage(verifier_fn),
-            _ReportStage(report_fn),
-        ],
-        mode=ResearchMode.DEEP,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Built-in concrete stages (thin wrappers that delegate to the agent's methods)
+# Built-in concrete stages
 # ---------------------------------------------------------------------------
 
 class _PlanStage(PipelineStage):
@@ -267,67 +206,3 @@ class _ReportStage(PipelineStage):
             yield {"type": "final_report", "report": f"报告生成失败：{result.message}"}
 
 
-class _VerifyStage(PipelineStage):
-    """Cross-verify key claims across multiple sources (deep mode only)."""
-    name = "verify"
-
-    def __init__(self, verify_fn: Callable) -> None:
-        self._verify = verify_fn
-
-    def execute(self, ctx: ResearchContext) -> StageResult:
-        try:
-            self._verify(ctx.state)
-            return StageResult(StageStatus.SUCCESS, "交叉验证完成")
-        except Exception as exc:
-            return StageResult(StageStatus.FAILED, str(exc))
-
-    def stream(self, ctx: ResearchContext) -> Iterator[dict[str, Any]]:
-        result = self.execute(ctx)
-        yield {"type": "status", "message": f"交叉验证: {result.message}"}
-
-
-class _QuickSearchStage(PipelineStage):
-    name = "quick_search"
-
-    def __init__(self, search_fn: Callable) -> None:
-        self._search = search_fn
-
-    def execute(self, ctx: ResearchContext) -> StageResult:
-        try:
-            self._search(ctx)
-            return StageResult(StageStatus.SUCCESS)
-        except Exception as exc:
-            return StageResult(StageStatus.FAILED, str(exc))
-
-
-class _QuickSummarizeStage(PipelineStage):
-    name = "quick_summarize"
-
-    def __init__(self, summarize_fn: Callable) -> None:
-        self._summarize = summarize_fn
-
-    def execute(self, ctx: ResearchContext) -> StageResult:
-        try:
-            self._summarize(ctx)
-            return StageResult(StageStatus.SUCCESS)
-        except Exception as exc:
-            return StageResult(StageStatus.FAILED, str(exc))
-
-
-class _QuickReportStage(PipelineStage):
-    name = "quick_report"
-
-    def __init__(self, report_fn: Callable) -> None:
-        self._report_fn = report_fn
-
-    def execute(self, ctx: ResearchContext) -> StageResult:
-        try:
-            report = self._report_fn(ctx)
-            ctx.output = SummaryStateOutput(
-                running_summary=report,
-                report_markdown=report,
-                todo_items=[],
-            )
-            return StageResult(StageStatus.SUCCESS, data=report)
-        except Exception as exc:
-            return StageResult(StageStatus.FAILED, str(exc))
