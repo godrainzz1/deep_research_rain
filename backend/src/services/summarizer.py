@@ -12,6 +12,7 @@ from config import Configuration
 from utils import strip_thinking_tokens
 from services.notes import build_note_guidance
 from services.text_processing import strip_tool_calls
+from services.summary_schema import normalize_summary
 
 
 class SummarizationService:
@@ -48,6 +49,9 @@ class SummarizationService:
         matches = list(heading.finditer(summary_text))
         if len(matches) >= 2:
             summary_text = summary_text[matches[-1].start():].strip()
+
+        # Pydantic schema normalization: parse → reformat for consistent output
+        summary_text = normalize_summary(summary_text)
 
         return summary_text or "暂无可用信息"
 
@@ -136,6 +140,8 @@ class SummarizationService:
                 # Keep the last heading block
                 cleaned = cleaned[matches[-1].start():].strip()
 
+            # Pydantic schema normalization
+            cleaned = normalize_summary(cleaned)
             return cleaned
 
         return generator(), get_summary
