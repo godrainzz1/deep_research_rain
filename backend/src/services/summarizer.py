@@ -42,6 +42,13 @@ class SummarizationService:
 
         summary_text = strip_tool_calls(summary_text).strip()
 
+        # Deduplicate: keep only last occurrence of "任务总结" heading
+        import re
+        heading = re.compile(r"^(?:#{1,3}\s*)?任务总结", re.MULTILINE)
+        matches = list(heading.finditer(summary_text))
+        if len(matches) >= 2:
+            summary_text = summary_text[matches[-1].start():].strip()
+
         return summary_text or "暂无可用信息"
 
     def stream_task_summary(
@@ -118,7 +125,18 @@ class SummarizationService:
             else:
                 cleaned = visible_output
 
-            return strip_tool_calls(cleaned).strip()
+            cleaned = strip_tool_calls(cleaned).strip()
+
+            # Deduplicate: LLM repeats summary after each tool call round.
+            # Keep only the LAST occurrence of the heading + everything after it.
+            import re
+            heading_pattern = re.compile(r"^(?:#{1,3}\s*)?任务总结", re.MULTILINE)
+            matches = list(heading_pattern.finditer(cleaned))
+            if len(matches) >= 2:
+                # Keep the last heading block
+                cleaned = cleaned[matches[-1].start():].strip()
+
+            return cleaned
 
         return generator(), get_summary
 
