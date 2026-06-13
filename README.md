@@ -3,7 +3,7 @@
 基于 HelloAgents 框架的全栈深度研究助手。多轮网络搜索 + 本地知识库 RAG + 三层记忆 + Skill 插件系统。
 
 ![Backend](https://img.shields.io/badge/Backend-FastAPI-009688?logo=fastapi)
-![LLM](https://img.shields.io/badge/LLM-Qwen3.6-6366f1)
+![LLM](https://img.shields.io/badge/LLM-Multi_Provider-6366f1)
 ![Frontend](https://img.shields.io/badge/Frontend-Vue_3-4fc08d?logo=vuedotjs)
 ![VectorDB](https://img.shields.io/badge/VectorDB-ChromaDB-ff6b6b)
 ![Python](https://img.shields.io/badge/Python-3.10+-3776ab?logo=python)
