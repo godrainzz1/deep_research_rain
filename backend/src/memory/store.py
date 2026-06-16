@@ -154,13 +154,18 @@ class SemanticMemory:
         """Embed and store a research summary as a knowledge card."""
         self._ensure_store()
         from rag.embedder import get_embedder
+        from services.text_processing import strip_tool_calls
+        # 清理报告中的工具调用残留（如 "✅ 笔记已成功保存"）
+        clean_summary = strip_tool_calls(summary).strip()
+        if not clean_summary:
+            return
         emb = get_embedder()
-        vec = emb.embed(f"{topic}: {summary}")
+        vec = emb.embed(f"{topic}: {clean_summary}")
         import uuid
         card_id = f"card_{topic}_{uuid.uuid4().hex[:8]}"
         self._store.add(
             ids=[card_id],
-            documents=[f"{topic}: {summary}"],
+            documents=[f"{topic}: {clean_summary}"],
             embeddings=[vec],
             metadatas=[metadata or {"topic": topic}],
             collection=self.COLLECTION,
@@ -188,13 +193,17 @@ class SemanticMemory:
 # Topic detection
 # ---------------------------------------------------------------------------
 
-def check_similar_topic(topic: str, threshold: float = 0.8) -> list[dict[str, Any]]:
-    """Return past sessions with similar topics (semantic similarity check)."""
+def check_similar_topic(topic: str, max_distance: float = 1.15) -> list[dict[str, Any]]:
+    """Return past sessions with similar topics (semantic similarity check).
+
+    Uses cosine distance directly (not 1-distance) because short queries vs
+    long documents naturally yield higher distances in embedding space.
+    Typical values: <1.0 = related, 1.0-1.15 = somewhat related, >1.3 = unrelated.
+    """
     try:
         sem = SemanticMemory()
         cards = sem.recall(topic, top_k=3)
-        # ChromaDB returns cosine distance; convert to similarity
-        similar = [c for c in cards if 1.0 - c["distance"] >= threshold]
+        similar = [c for c in cards if c["distance"] < max_distance]
         return similar
     except Exception:
         logger.debug("Semantic memory unavailable — skipping topic detection")
