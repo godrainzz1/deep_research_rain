@@ -166,10 +166,28 @@ class PlanningService:
                     if isinstance(item, dict):
                         tasks.append(item)
 
-        # Fallback 2: multiple [TOOL_CALL:note:...] entries — extract task
-        # parameters from each note creation call
+        # Fallback 2: multiple [TOOL_CALL:note:...] entries
         if not tasks:
             tasks = self._extract_tasks_from_note_calls(text)
+        else:
+            # JSON 路径提取到了 tasks，但 LLM 可能把 title 复制到 intent
+            # → 用 note call content 中的 "目标：..." 补全 intent
+            note_tasks = self._extract_tasks_from_note_calls(text)
+            if note_tasks:
+                # 按 title 匹配，用 note call 的 intent 覆盖空/重复的 intent
+                note_by_title = {}
+                for nt in note_tasks:
+                    note_by_title[nt.get("title", "")] = nt
+                for task in tasks:
+                    t_title = task.get("title", "")
+                    match = note_by_title.get(t_title)
+                    if match:
+                        better_intent = match.get("intent", "")
+                        if better_intent and better_intent != t_title:
+                            task["intent"] = better_intent
+                        better_query = match.get("query", "")
+                        if better_query and not task.get("query"):
+                            task["query"] = better_query
 
         return tasks
 
