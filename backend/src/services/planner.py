@@ -87,6 +87,7 @@ class PlanningService:
 
         tasks_payload = self._extract_tasks(response)
         todo_items: List[TodoItem] = []
+        seen_titles: set[str] = set()
 
         for idx, item in enumerate(tasks_payload, start=1):
             title = str(item.get("title") or f"任务{idx}").strip()
@@ -96,8 +97,14 @@ class PlanningService:
             if not query:
                 query = state.research_topic
 
+            # 去重：LLM 可能生成同名任务，保留第一个
+            if title in seen_titles:
+                logger.warning("Duplicate task title skipped: %s", title)
+                continue
+            seen_titles.add(title)
+
             task = TodoItem(
-                id=idx,
+                id=len(todo_items) + 1,  # 跳过重复后的实际序号
                 title=title,
                 intent=intent,
                 query=query,
