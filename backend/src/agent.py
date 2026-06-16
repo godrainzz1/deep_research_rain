@@ -331,15 +331,30 @@ class DeepResearchAgent:
             from memory.store import check_similar_topic as _check
             similar = _check(topic)
             if similar:
-                yield {
-                    "type": "memory_recall",
-                    "topic": topic,
-                    "similar": [
-                        {"topic": s.get("metadata", {}).get("topic", s.get("document", "")[:80]),
-                         "distance": round(1.0 - s.get("distance", 0), 2)}
-                        for s in similar[:3]
-                    ],
-                }
+                cards = []
+                for s in similar[:3]:
+                    doc = s.get("document", "")
+                    meta = s.get("metadata", {})
+                    # 提取干净标题：优先用 metadata，否则从文档开头取（跳过工具噪音）
+                    card_topic = meta.get("topic") or doc.split(":")[0].lstrip("# ")[:60]
+                    # 预览：取文档的前 200 字符，跳过开头可能存在的工具响应
+                    preview = doc.split("\n\n", 1)[-1] if "\n\n" in doc else doc
+                    preview = preview[:200]
+                    # 相似度映射：distance 0-1.15 → 高/中/低
+                    raw_dist = s.get("distance", 1.0)
+                    if raw_dist < 0.95:
+                        level = "high"
+                    elif raw_dist < 1.1:
+                        level = "medium"
+                    else:
+                        level = "low"
+                    cards.append({
+                        "topic": card_topic,
+                        "preview": preview.strip(),
+                        "level": level,
+                        "session_id": meta.get("session_id", ""),
+                    })
+                yield {"type": "memory_recall", "topic": topic, "similar": cards}
                 logger.info("Semantic memory recall: %d similar topics found", len(similar))
         except Exception:
             logger.debug("Semantic recall skipped")

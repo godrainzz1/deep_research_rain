@@ -28,7 +28,19 @@
       <section class="main">
         <div class="topbar"><span class="chip" :class="{live:loading}"><span class="dot"></span>{{ loading?'进行中':'已完成' }}</span><span class="topbar-skill" v-if="activeSkill">技能：{{ activeSkill }}</span><span class="topbar-meta">{{ progressLogs.length }} 条日志</span><button class="btn btn-secondary btn-sm" @click="showLogs=!showLogs">{{ showLogs?'收起':'展开' }}日志</button></div>
         <div v-if="showLogs && progressLogs.length" class="log-box"><p v-for="(l,i) in progressLogs" :key="i" class="log-line">{{ l }}</p></div>
-	        <div v-if="memoryRecall.length" class="recall-banner"><span>🕮 语义记忆召回 — 相似历史研究：</span><span v-for="(m,i) in memoryRecall" :key="i" class="recall-chip">{{ m.topic }} <em>({{ (m.distance*100).toFixed(0) }}%匹配)</em></span></div>
+	        <div v-if="memoryRecall.length" class="recall-banner">
+        <span>🕮 语义记忆 — 你研究过相似话题：</span>
+        <span v-for="(m,i) in memoryRecall" :key="i" class="recall-chip" :class="{expanded:expandedCard===i}" @click="expandedCard=expandedCard===i?null:i">
+          {{ m.topic }}
+          <em v-if="m.level==='high'">(高度相关)</em>
+          <em v-else-if="m.level==='medium'">(中度相关)</em>
+          <em v-else>(低度相关)</em>
+          <div v-if="expandedCard===i" class="recall-preview">
+            <div class="md" v-html="renderMd(m.preview||'暂无内容')"></div>
+            <button class="btn btn-secondary btn-sm" @click.stop="expandedCard=null" style="margin-top:8px">收起</button>
+          </div>
+        </span>
+      </div>
         <div class="card" v-if="currentTask"><h3>{{ currentTaskTitle }}</h3><p class="muted">{{ currentTaskIntent }}</p>
           <div v-if="currentTaskSources.length" class="section"><h4>来源</h4><ul class="src-list"><li v-for="(s,i) in currentTaskSources" :key="i"><a :href="s.url" target="_blank">{{ s.title||s.url }}</a><span v-if="s.snippet" class="snippet">{{ s.snippet.slice(0,200) }}</span></li></ul></div>
           <div class="section"><h4>任务总结</h4><div class="md" v-html="renderMd(currentTaskSummary||'暂无可用信息')"></div></div>
@@ -63,7 +75,8 @@ const history = ref<{id:string;topic:string;created_at:number}[]>([]);
 const historyDetail = ref<{id:string;topic:string;report_markdown:string}|null>(null);
 const uploading = ref(false); const uploadMsg = ref(""); const kbStats = ref<number|null>(null);
 const fileInput = ref<HTMLInputElement|null>(null);
-const memoryRecall = ref<{topic:string;distance:number}[]>([]);
+const memoryRecall = ref<{topic:string;preview:string;level:string;session_id:string}[]>([]);
+const expandedCard = ref<number|null>(null);
 let currentController: AbortController|null = null;
 
 const searchOptions = [{value:"duckduckgo",label:"DuckDuckGo"},{value:"hybrid",label:"Hybrid 混合"},{value:"tavily",label:"Tavily"},{value:"perplexity",label:"Perplexity"}];
@@ -104,7 +117,7 @@ const handleSubmit=async()=>{
 if(ev.type==="task_summary_reset"){ const task=findTask(ev.task_id);if(task&&typeof ev.content==="string")task.summary=ev.content;return }
       if(ev.type==="sources"){ const task=findTask(ev.task_id);if(task){ const t=[ep.latest_sources,ep.sources_summary,ep.raw_context].find(v=>typeof v==="string") as string;if(t)task.sourcesSummary=t } return }
       if(ev.type==="tool_call"){ const task=findTask(ep.task_id); const entry:ToolCallLog={eventId:Number(ep.event_id)||Date.now(),agent:String(ep.agent||""),tool:String(ep.tool||""),parameters:(ep.parameters&&typeof ep.parameters==="object"?ep.parameters:{}) as Record<string,unknown>,result:String(ep.result||""),noteId:typeof ep.note_id==="string"?ep.note_id:null,notePath:typeof ep.note_path==="string"?ep.note_path:null,timestamp:Date.now()}; if(task){task.toolCalls.push(entry);if(entry.noteId)task.noteId=entry.noteId} progressLogs.value.push(entry.agent+" -> "+entry.tool);return }
-      if(ev.type==="memory_recall"){ if(Array.isArray(ev.similar)&&ev.similar.length){ memoryRecall.value=ev.similar as {topic:string;distance:number}[]; progressLogs.value.push('语义记忆: 发现 '+ev.similar.length+' 个相似历史研究') } return }
+      if(ev.type==="memory_recall"){ if(Array.isArray(ev.similar)&&ev.similar.length){ memoryRecall.value=ev.similar as {topic:string;preview:string;level:string;session_id:string}[]; progressLogs.value.push('语义记忆: 发现 '+ev.similar.length+' 个相似历史研究') } return }
       if(ev.type==="final_report"){ reportMarkdown.value=typeof ev.report==="string"?ev.report.trim():"";progressLogs.value.push("最终报告已生成");loadHistory();return }
       if(ev.type==="error"){ error.value=typeof ev.detail==="string"?ev.detail:"发生错误" }
     },{signal:c.signal});
@@ -200,9 +213,12 @@ onBeforeUnmount(()=>{ if(currentController)currentController.abort() });
 .report-standalone { border-top:2px solid var(--color-accent-cyan); margin-top:var(--space-8); padding-top:var(--space-6); }
 .report-card { border-color:var(--color-border-active); }
 .empty { display:flex; align-items:center; justify-content:center; height:200px; color:var(--color-text-muted); }
-.recall-banner { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 16px; background:rgba(56,189,248,0.08); border:1px solid var(--color-border-active); border-radius:var(--radius-md); font-size:var(--font-size-sm); color:var(--color-accent-cyan); }
-.recall-chip { display:inline-block; padding:2px 10px; background:rgba(129,140,248,0.15); border-radius:var(--radius-full); font-size:var(--font-size-xs); color:var(--color-accent-purple); }
-.recall-chip em { font-style:normal; color:var(--color-text-muted); }
+.recall-banner { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; padding:10px 16px; background:rgba(56,189,248,0.08); border:1px solid var(--color-border-active); border-radius:var(--radius-md); font-size:var(--font-size-sm); color:var(--color-accent-cyan); }
+.recall-chip { display:inline-block; padding:2px 10px; background:rgba(129,140,248,0.15); border-radius:var(--radius-full); font-size:var(--font-size-xs); color:var(--color-accent-purple); cursor:pointer; transition:all var(--transition-fast); position:relative; }
+.recall-chip:hover { background:rgba(129,140,248,0.3); }
+.recall-chip.expanded { border-radius:var(--radius-md); background:rgba(129,140,248,0.2); padding:8px 12px; width:100%; }
+.recall-chip em { font-style:normal; color:var(--color-success); margin-left:4px; }
+.recall-preview { margin-top:8px; padding:10px; background:rgba(0,0,0,0.2); border-radius:var(--radius-sm); font-size:var(--font-size-sm); color:var(--color-text-primary); max-height:300px; overflow-y:auto; }
 .tool-entry { background:var(--color-bg-input); border:1px solid var(--color-border); border-radius:var(--radius-md); padding:var(--space-3); margin-top:var(--space-2); }
 .tool-head { font-size:var(--font-size-xs); display:flex; gap:var(--space-2); align-items:center; flex-wrap:wrap; }
 .tool-head code { font-family:var(--font-mono); color:var(--color-accent-cyan); }
