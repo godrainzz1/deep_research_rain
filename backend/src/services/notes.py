@@ -8,52 +8,33 @@ from models import TodoItem
 
 
 def build_note_guidance(task: TodoItem) -> str:
-    """Generate note tool usage guidance for a specific task."""
+    """Generate note tool usage guidance for a specific task.
+
+    程序化 create/update 已由 _ensure_task_note / _update_task_note 保证执行。
+    此处只引导 LLM 读取笔记获取上下文，不再劝其自行 create/update ——
+    LLM 的工具调用会触发重新生成，导致前端重复输出。
+    """
 
     tags_list = ["deep_research", f"task_{task.id}"]
     tags_literal = json.dumps(tags_list, ensure_ascii=False)
 
     if task.note_id:
-        read_payload = json.dumps({"action": "read", "note_id": task.note_id}, ensure_ascii=False)
-        update_payload = json.dumps(
-            {
-                "action": "update",
-                "note_id": task.note_id,
-                "task_id": task.id,
-                "title": f"任务 {task.id}: {task.title}",
-                "note_type": "task_state",
-                "tags": tags_list,
-                "content": "请将本轮新增信息补充到任务概览中",
-            },
-            ensure_ascii=False,
+        read_payload = json.dumps(
+            {"action": "read", "note_id": task.note_id}, ensure_ascii=False
         )
 
         return (
             "笔记协作指引：\n"
-            f"- 当前任务笔记 ID：{task.note_id}。\n"
-            f"- 在书写总结前必须调用：[TOOL_CALL:note:{read_payload}] 获取最新内容。\n"
-            f"- 完成分析后调用：[TOOL_CALL:note:{update_payload}] 同步增量信息。\n"
-            "- 更新时保持原有段落结构，新增内容请在对应段落中补充。\n"
-            f"- 建议 tags 保持为 {tags_literal}，保证其他 Agent 可快速定位。\n"
-            "- 成功同步到笔记后，再输出面向用户的总结。\n"
+            f"- 当前任务笔记 ID：{task.note_id}（笔记已由系统自动创建，无需你再创建或更新）。\n"
+            f"- 在书写总结前建议先读取笔记了解任务背景：\n"
+            f"  [TOOL_CALL:note:{read_payload}]\n"
+            "- 读取笔记后直接输出面向用户的 Markdown 总结，不要再调用 update。\n"
+            "- 系统会在你输出完成后自动将总结写入笔记。\n"
         )
 
-    create_payload = json.dumps(
-        {
-            "action": "create",
-            "task_id": task.id,
-            "title": f"任务 {task.id}: {task.title}",
-            "note_type": "task_state",
-            "tags": tags_list,
-            "content": "请记录任务概览、来源概览",
-        },
-        ensure_ascii=False,
-    )
-
+    # 不应到达这里（_ensure_task_note 已保证 note_id 存在），
+    # 保留兜底以防极少数竞态
     return (
         "笔记协作指引：\n"
-        f"- 当前任务尚未建立笔记，请先调用：[TOOL_CALL:note:{create_payload}]。\n"
-        "- 创建成功后记录返回的 note_id，并在后续所有更新中复用。\n"
-        "- 同步笔记后，再输出面向用户的总结。\n"
+        "- 任务笔记将由系统自动创建，请直接输出面向用户的 Markdown 总结。\n"
     )
-

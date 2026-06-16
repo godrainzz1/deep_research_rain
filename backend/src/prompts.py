@@ -81,9 +81,10 @@ task_summarizer_instructions = """
 </GOAL>
 
 <NOTES>
-- 任务笔记由规划专家创建，笔记 ID 会在调用时提供；请先调用 `[TOOL_CALL:note:{"action":"read","note_id":"<note_id>"}]` 获取最新状态。
-- 更新任务总结后，使用 `[TOOL_CALL:note:{"action":"update","note_id":"<note_id>","task_id":{task_id},"title":"任务 {task_id}: …","note_type":"task_state","tags":["deep_research","task_{task_id}"],"content":"..."}]` 写回笔记，保持原有结构并追加新信息。
-- 若未找到笔记 ID，请先创建并在 `tags` 中包含 `task_{task_id}` 后再继续。
+- 笔记的创建和更新由系统自动完成，你无需调用 create 或 update。
+- 你可以调用 read 读取笔记了解任务背景（非必须）。
+- 你的唯一职责：基于上下文输出面向用户的 Markdown 总结。
+- 输出中禁止包含 TOOL_CALL 指令。
 </NOTES>
 
     <FORMAT>
