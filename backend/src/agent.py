@@ -144,6 +144,7 @@ class DeepResearchAgent:
         self.summarizer = SummarizationService(self._summarizer_factory, self.config)
         self.reporting = ReportingService(self.report_agent, self.config)
         self._last_search_notices: list[str] = []
+        self._skill_body: str = ""  # 匹配到的 skill 指令文本，注入 prompt
 
     # ------------------------------------------------------------------
     # Public API
@@ -262,6 +263,16 @@ class DeepResearchAgent:
         """Execute the research workflow and return the final report."""
         state = SummaryState(research_topic=topic)
 
+        # 匹配 Skill
+        try:
+            from services.skill_engine import SkillEngine
+            se = SkillEngine(skills_dir="skills")
+            se.load_all()
+            matched = se.match(topic)
+            self._skill_body = matched.body.strip() if matched else ""
+        except Exception:
+            self._skill_body = ""
+
         try:
             state.todo_items = self.planner.plan_todo_list(state)
         except Exception as exc:
@@ -282,7 +293,7 @@ class DeepResearchAgent:
                 task.status = "failed"
                 task.summary = f"任务执行失败：{exc}"
 
-        report = self.reporting.generate_report(state)
+        report = self.reporting.generate_report(state, skill_body=self._skill_body)
         self._drain_tool_events(state)
         state.structured_report = report
         state.running_summary = report
@@ -312,17 +323,23 @@ class DeepResearchAgent:
         state = SummaryState(research_topic=topic)
         logger.info("Starting streaming research: topic=%s", topic)
 
-        # 匹配 Skill
+        # 匹配 Skill — 将 body 注入后续 LLM prompt
         try:
             from services.skill_engine import SkillEngine
             se = SkillEngine(skills_dir="skills")
             se.load_all()
             matched = se.match(topic)
-            skill_name = matched.name if matched else "deep-research"
+            if matched:
+                skill_name = matched.name
+                self._skill_body = matched.body.strip()
+            else:
+                skill_name = "deep-research"
+                self._skill_body = ""
         except Exception:
             skill_name = "deep-research"
+            self._skill_body = ""
 
-        logger.info("Matched skill: %s", skill_name)
+        logger.info("Matched skill: %s (body_len=%d)", skill_name, len(self._skill_body))
         yield {"type": "status", "message": "初始化研究流程"}
         yield {"type": "skill", "name": skill_name}
 
@@ -447,7 +464,7 @@ class DeepResearchAgent:
         # Generate final report
         yield {"type": "status", "message": "正在生成最终报告..."}
         try:
-            report = self.reporting.generate_report(state)
+            report = self.reporting.generate_report(state, skill_body=self._skill_body)
         except Exception as exc:
             logger.exception("Report generation failed")
             report = f"报告生成失败：{exc}"
@@ -520,7 +537,8 @@ class DeepResearchAgent:
                    "note_id": task.note_id, "note_path": task.note_path}
             # 流式推送 — 每个 chunk 即时清理工具调用语法后发送，保留实时反馈
             from services.text_processing import strip_tool_calls as _strip
-            summary_stream, summary_getter = self.summarizer.stream_task_summary(state, task, context)
+            summary_stream, summary_getter = self.summarizer.stream_task_summary(
+                state, task, context, skill_body=self._skill_body)
             try:
                 for event in self._drain_tool_events(state, step=step): yield event
                 for chunk in summary_stream:
@@ -537,7 +555,7 @@ class DeepResearchAgent:
                     yield {"type": "task_summary_reset", "task_id": task.id,
                            "content": summary_text.strip(), "step": step}
         else:
-            summary_text = self.summarizer.summarize_task(state, task, context)
+            summary_text = self.summarizer.summarize_task(state, task, context, skill_body=self._skill_body)
             self._drain_tool_events(state)
 
         task.summary = summary_text.strip() if summary_text else "暂无可用信息"

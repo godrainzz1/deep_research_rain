@@ -26,10 +26,11 @@ class SummarizationService:
         self._agent_factory = summarizer_factory
         self._config = config
 
-    def summarize_task(self, state: SummaryState, task: TodoItem, context: str) -> str:
+    def summarize_task(self, state: SummaryState, task: TodoItem, context: str,
+                       skill_body: str = "") -> str:
         """Generate a task-specific summary using the summarizer agent."""
 
-        prompt = self._build_prompt(state, task, context)
+        prompt = self._build_prompt(state, task, context, skill_body)
 
         agent = self._agent_factory()
         try:
@@ -56,11 +57,12 @@ class SummarizationService:
         return summary_text or "暂无可用信息"
 
     def stream_task_summary(
-        self, state: SummaryState, task: TodoItem, context: str
+        self, state: SummaryState, task: TodoItem, context: str,
+        skill_body: str = "",
     ) -> Tuple[Iterator[str], Callable[[], str]]:
         """Stream the summary text for a task while collecting full output."""
 
-        prompt = self._build_prompt(state, task, context)
+        prompt = self._build_prompt(state, task, context, skill_body)
         remove_thinking = self._config.strip_thinking_tokens
         raw_buffer = ""
         visible_output = ""
@@ -165,15 +167,19 @@ class SummarizationService:
 
         return generator(), get_summary
 
-    def _build_prompt(self, state: SummaryState, task: TodoItem, context: str) -> str:
+    def _build_prompt(self, state: SummaryState, task: TodoItem, context: str,
+                       skill_body: str = "") -> str:
         """Construct the summarization prompt shared by both modes."""
 
-        return (
+        prompt = (
             f"任务主题：{state.research_topic}\n"
             f"任务名称：{task.title}\n"
             f"任务目标：{task.intent}\n"
             f"检索查询：{task.query}\n"
             f"任务上下文：\n{context}\n"
             f"{build_note_guidance(task)}\n"
-            "请按照以上协作要求先同步笔记，然后返回一份面向用户的 Markdown 总结（仍遵循任务总结模板）。"
+            "请生成一份面向用户的 Markdown 总结（遵循任务总结模板）。"
         )
+        if skill_body:
+            prompt += f"\n\n<SKILL_INSTRUCTIONS>\n{skill_body}\n</SKILL_INSTRUCTIONS>"
+        return prompt

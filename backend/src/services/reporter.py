@@ -33,7 +33,7 @@ class ReportingService:
         self._agent = report_agent
         self._config = config
 
-    def generate_report(self, state: SummaryState) -> str:
+    def generate_report(self, state: SummaryState, skill_body: str = "") -> str:
         """Generate a structured report based on completed tasks."""
 
         tasks_block = []
@@ -69,6 +69,8 @@ class ReportingService:
             f"（不要为每个任务单独生成报告，禁止重复输出研究报告标题）。\n"
             f"如需保存最终报告要点，可调用：[TOOL_CALL:note:{create_conclusion_template}]。"
         )
+        if skill_body:
+            prompt += f"\n\n<SKILL_INSTRUCTIONS>\n{skill_body}\n</SKILL_INSTRUCTIONS>"
 
         response = self._agent.run(prompt)
         self._agent.clear_history()
