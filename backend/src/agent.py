@@ -483,6 +483,9 @@ class DeepResearchAgent:
         search_result, notices, answer_text, backend = dispatch_search(query, self.config, state.research_loop_count)
         task.notices = notices
 
+        # --- 程序化创建笔记（搜索前创建，保证搜索失败时也有笔记记录）---
+        self._ensure_task_note(task)
+
         if emit_stream:
             yield {"type": "task_status", "task_id": task.id, "status": "in_progress",
                    "title": task.title, "intent": task.intent,
@@ -501,9 +504,6 @@ class DeepResearchAgent:
 
         if not emit_stream:
             self._drain_tool_events(state)
-
-        # --- 程序化创建笔记（不再依赖 LLM 自行调用 create tool）---
-        self._ensure_task_note(task)
 
         sources_summary, context = prepare_research_context(search_result, answer_text, self.config, rag_query=query)
         task.sources_summary = sources_summary
