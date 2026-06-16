@@ -43,7 +43,7 @@
       </div>
         <div class="card" v-if="currentTask"><h3>{{ currentTaskTitle }}</h3><p class="muted" v-if="currentTaskIntent && currentTaskIntent !== currentTaskTitle">{{ currentTaskIntent }}</p>
           <div v-if="currentTaskSources.length" class="section"><h4>来源</h4><ul class="src-list"><li v-for="(s,i) in currentTaskSources" :key="i"><a :href="s.url" target="_blank">{{ s.title||s.url }}</a><span v-if="s.snippet" class="snippet">{{ s.snippet.slice(0,200) }}</span></li></ul></div>
-          <div class="section"><h4>任务总结</h4><div class="md" v-html="renderMd(currentTaskSummary||'暂无可用信息')"></div></div>
+          <div class="section"><div class="md" v-html="renderMd(currentTaskSummary||'暂无可用信息')"></div></div>
           <div class="section" v-if="currentTaskToolCalls.length"><h4>工具调用 ({{ currentTaskToolCalls.length }})</h4><div class="tool-entry" v-for="tc in currentTaskToolCalls" :key="tc.eventId"><div class="tool-head"><strong>{{ tc.agent }}</strong> <code>{{ tc.tool }}</code><span v-if="tc.noteId" class="note-id">笔记: {{ tc.noteId }}</span></div><pre class="tool-params">{{ JSON.stringify(tc.parameters, null, 2) }}</pre><pre class="tool-result" v-if="tc.result">{{ tc.result.slice(0, 500) }}</pre></div></div>
         </div>
         <div v-if="reportMarkdown" class="report-standalone"><div style="background:rgba(129,140,248,0.06);border:1px solid var(--color-border-active);border-radius:var(--radius-lg);padding:var(--space-6);"><h3 style="color:var(--color-accent-cyan);font-size:var(--font-size-xl);margin-top:0">最终研究报告 (全局)</h3><p class="muted" style="margin-bottom:var(--space-4)">以下报告综合所有子任务结论生成，独立于左侧任务清单</p><div class="md" v-html="renderMd(reportMarkdown)"></div></div></div>
