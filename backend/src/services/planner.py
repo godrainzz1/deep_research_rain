@@ -91,7 +91,10 @@ class PlanningService:
 
         for idx, item in enumerate(tasks_payload, start=1):
             title = str(item.get("title") or f"任务{idx}").strip()
-            intent = str(item.get("intent") or "聚焦主题的关键问题").strip()
+            intent = str(item.get("intent") or "").strip()
+            # LLM 可能把 title 复制到 intent，视为无效意图
+            if not intent or intent == title:
+                intent = "聚焦主题的关键问题"
             query = str(item.get("query") or state.research_topic).strip()
 
             if not query:
