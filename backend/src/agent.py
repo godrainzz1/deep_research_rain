@@ -288,12 +288,16 @@ class DeepResearchAgent:
         state.running_summary = report
         self._persist_final_report(state, report)
 
-        # 持久化到记忆
+        # 持久化到记忆（情景 + 语义）
         try:
-            from memory.store import get_memory_store
+            from memory.store import get_memory_store, SemanticMemory
             import uuid
             sid = f"session_{uuid.uuid4().hex[:12]}"
             get_memory_store().save_session(sid, topic, report or "")
+            # 语义记忆：将研究报告嵌入为知识卡片，供未来相似话题召回
+            SemanticMemory().store_knowledge_card(
+                topic, report or "", metadata={"session_id": sid}
+            )
         except Exception:
             logger.debug("Memory save skipped (store unavailable)")
 
@@ -321,6 +325,24 @@ class DeepResearchAgent:
         logger.info("Matched skill: %s", skill_name)
         yield {"type": "status", "message": "初始化研究流程"}
         yield {"type": "skill", "name": skill_name}
+
+        # 语义记忆召回：检查是否有相似历史研究
+        try:
+            from memory.store import check_similar_topic as _check
+            similar = _check(topic)
+            if similar:
+                yield {
+                    "type": "memory_recall",
+                    "topic": topic,
+                    "similar": [
+                        {"topic": s.get("metadata", {}).get("topic", s.get("document", "")[:80]),
+                         "distance": round(1.0 - s.get("distance", 0), 2)}
+                        for s in similar[:3]
+                    ],
+                }
+                logger.info("Semantic memory recall: %d similar topics found", len(similar))
+        except Exception:
+            logger.debug("Semantic recall skipped")
 
         # 规划阶段 — 失败时使用兜底任务
         try:
@@ -421,13 +443,17 @@ class DeepResearchAgent:
         # Persist final report to notes
         self._persist_final_report(state, report)
 
-        # Save to memory (persistent across sessions)
+        # Save to memory (persistent across sessions) — 情景 + 语义
         try:
-            from memory.store import get_memory_store
+            from memory.store import get_memory_store, SemanticMemory
             import uuid, json
             sid = f"session_{uuid.uuid4().hex[:12]}"
             meta = {"skill": skill_name, "tasks": [t.title for t in state.todo_items]}
             get_memory_store().save_session(sid, topic, report or "", metadata=meta)
+            # 语义记忆：嵌入研究报告供未来相似话题召回
+            SemanticMemory().store_knowledge_card(
+                topic, report or "", metadata={"session_id": sid, "skill": skill_name}
+            )
             logger.info("Memory saved: session=%s skill=%s", sid, skill_name)
         except Exception:
             logger.debug("Memory save skipped")
