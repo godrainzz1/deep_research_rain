@@ -606,9 +606,10 @@ class DeepResearchAgent:
             return
 
         with self._state_lock:
+            # 不添加 ### 任务总结 标题，LLM 输出已自带 ## 任务总结
             content = (
                 f"## 任务状态：已完成\n\n"
-                f"### 任务总结\n\n{task.summary}\n\n"
+                f"{task.summary}\n\n"
                 f"### 来源概览\n\n{task.sources_summary or '暂无来源'}"
             )
             try:

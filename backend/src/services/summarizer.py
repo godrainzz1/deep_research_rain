@@ -131,14 +131,33 @@ class SummarizationService:
 
             cleaned = strip_tool_calls(cleaned).strip()
 
-            # Deduplicate: LLM repeats summary after each tool call round.
-            # Keep only the LAST occurrence of the heading + everything after it.
+            # 层1: 标题级去重 — LLM 多次输出 "## 任务总结"
             import re
             heading_pattern = re.compile(r"^(?:#{1,3}\s*)?任务总结", re.MULTILINE)
             matches = list(heading_pattern.finditer(cleaned))
             if len(matches) >= 2:
-                # Keep the last heading block
                 cleaned = cleaned[matches[-1].start():].strip()
+
+            # 层2: 发现级去重 — LLM 在同一个块内重复输出相同标题的发现
+            # 按 ### N. 切分，对相同标题只保留最后一次
+            finding_boundary = re.compile(r"^(?=###\s+\d+\.?\s)", re.MULTILINE)
+            parts = finding_boundary.split(cleaned)
+            if len(parts) > 1:
+                # parts[0] 是第一个 ### 之前的内容（任务总结标题等）
+                preamble = parts[0]
+                seen: dict[str, int] = {}  # title_key -> index
+                for i, section in enumerate(parts[1:], 1):
+                    # Extract title from first line
+                    first_line = section.split("\n", 1)[0].strip()
+                    title_key = re.sub(r"^###\s*\d+\.?\s*", "", first_line).strip().lower()
+                    seen[title_key] = i  # 后面的覆盖前面的 => 保留最后
+                # Rebuild: preamble + unique sections (in original order, last occurrence)
+                keep_indices = set(seen.values())
+                rebuilt = [preamble]
+                for i, section in enumerate(parts[1:], 1):
+                    if i in keep_indices:
+                        rebuilt.append(section)
+                cleaned = "".join(rebuilt).strip()
 
             # Pydantic schema normalization
             cleaned = normalize_summary(cleaned)
