@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 
 # 修复 Windows 下 hello_agents 打印 emoji 时的 GBK 编码错误
 if sys.platform == "win32":
@@ -86,20 +87,12 @@ def _build_config(payload: ResearchRequest) -> Configuration:
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="HelloAgents Deep Researcher")
-
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     skill_engine = SkillEngine(skills_dir="skills")
 
-    @app.on_event("startup")
-    def log_startup_configuration() -> None:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):  # noqa: ARG001
+        """Startup: log configuration & load skills."""
         config = Configuration.from_env()
 
         if config.llm_provider == "ollama":
@@ -125,6 +118,18 @@ def create_app() -> FastAPI:
 
         count = skill_engine.load_all()
         logger.info("SkillEngine loaded %d skill(s)", count)
+        yield  # app runs here
+        # shutdown: nothing to clean up
+
+    app = FastAPI(title="HelloAgents Deep Researcher", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     @app.get("/healthz")
     def health_check() -> Dict[str, str]:

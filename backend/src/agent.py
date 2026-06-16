@@ -461,6 +461,9 @@ class DeepResearchAgent:
         if not emit_stream:
             self._drain_tool_events(state)
 
+        # --- 程序化创建笔记（不再依赖 LLM 自行调用 create tool）---
+        self._ensure_task_note(task)
+
         sources_summary, context = prepare_research_context(search_result, answer_text, self.config, rag_query=query)
         task.sources_summary = sources_summary
         with self._state_lock:
@@ -474,22 +477,34 @@ class DeepResearchAgent:
             yield {"type": "sources", "task_id": task.id, "latest_sources": sources_summary,
                    "raw_context": context, "step": step, "backend": backend,
                    "note_id": task.note_id, "note_path": task.note_path}
+            # 流式推送 — 每个 chunk 即时清理工具调用语法后发送，保留实时反馈
+            from services.text_processing import strip_tool_calls as _strip
             summary_stream, summary_getter = self.summarizer.stream_task_summary(state, task, context)
             try:
                 for event in self._drain_tool_events(state, step=step): yield event
                 for chunk in summary_stream:
                     if chunk:
-                        yield {"type": "task_summary_chunk", "task_id": task.id, "content": chunk,
-                               "note_id": task.note_id, "step": step}
+                        clean = _strip(chunk)
+                        if clean.strip():
+                            yield {"type": "task_summary_chunk", "task_id": task.id,
+                                   "content": clean, "note_id": task.note_id, "step": step}
                     for event in self._drain_tool_events(state, step=step): yield event
             finally:
+                # 流结束 — 用最终去重版本替换前端累积的流式内容
                 summary_text = summary_getter()
+                if summary_text and summary_text.strip():
+                    yield {"type": "task_summary_reset", "task_id": task.id,
+                           "content": summary_text.strip(), "step": step}
         else:
             summary_text = self.summarizer.summarize_task(state, task, context)
             self._drain_tool_events(state)
 
         task.summary = summary_text.strip() if summary_text else "暂无可用信息"
         task.status = "completed"
+
+        # --- 程序化更新笔记（不再依赖 LLM 自行调用 update tool）---
+        self._update_task_note(task)
+
         if emit_stream:
             for event in self._drain_tool_events(state, step=step): yield event
             yield {"type": "task_status", "task_id": task.id, "status": "completed",
@@ -497,6 +512,77 @@ class DeepResearchAgent:
                    "note_id": task.note_id, "note_path": task.note_path, "step": step}
         else:
             self._drain_tool_events(state)
+
+    def _ensure_task_note(self, task: TodoItem) -> None:
+        """程序化创建笔记 — 不依赖 LLM 自行调用 create tool。
+
+        确保每个任务在进入总结阶段前都有一个真实笔记 ID，
+        且该 ID 不会被 LLM 幻觉覆盖（_attach_note_to_task 保护）。
+        """
+        if task.note_id:
+            return  # 已有笔记，无需创建
+
+        if not self.note_tool:
+            return
+
+        with self._state_lock:
+            # 双重检查：锁内再次确认 note_id 未被其他线程设置
+            if task.note_id:
+                return
+
+            title = f"任务 {task.id}: {task.title}"
+            tags = ["deep_research", f"task_{task.id}"]
+            content = (
+                f"任务目标：{task.intent}\n"
+                f"检索查询：{task.query}\n"
+                f"请记录任务概览、来源概览、任务总结"
+            )
+
+            response = self.note_tool.run({
+                "action": "create",
+                "task_id": task.id,
+                "title": title,
+                "note_type": "task_state",
+                "tags": tags,
+                "content": content,
+            })
+
+            note_id = self._extract_note_id_from_text(response)
+            if note_id:
+                task.note_id = note_id
+                if self.config.notes_workspace:
+                    workspace = self.config.notes_workspace
+                    task.note_path = str(Path(workspace) / f"{note_id}.md")
+                logger.info("Programmatic note created: task_id=%d note_id=%s", task.id, note_id)
+            else:
+                logger.warning("Failed to extract note_id from create response: %s", response[:200])
+
+    def _update_task_note(self, task: TodoItem) -> None:
+        """程序化更新笔记 — 将最终任务总结写入已有笔记。"""
+        if not task.note_id or not self.note_tool:
+            return
+        if not task.summary or task.summary == "暂无可用信息":
+            return
+
+        with self._state_lock:
+            content = (
+                f"## 任务状态：已完成\n\n"
+                f"### 任务总结\n\n{task.summary}\n\n"
+                f"### 来源概览\n\n{task.sources_summary or '暂无来源'}"
+            )
+            try:
+                self.note_tool.run({
+                    "action": "update",
+                    "note_id": task.note_id,
+                    "task_id": task.id,
+                    "title": f"任务 {task.id}: {task.title}",
+                    "note_type": "task_state",
+                    "tags": ["deep_research", f"task_{task.id}"],
+                    "content": content,
+                })
+                logger.info("Programmatic note updated: task_id=%d note_id=%s", task.id, task.note_id)
+            except Exception as exc:
+                logger.warning("Failed to update note %s: %s", task.note_id, exc)
 
     def _drain_tool_events(
         self,

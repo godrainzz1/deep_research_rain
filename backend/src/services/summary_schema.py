@@ -19,7 +19,7 @@ class SummaryFinding(BaseModel):
 class TaskSummary(BaseModel):
     """Structured task summary output."""
 
-    findings: list[SummaryFinding] = Field(default_factory=list, min_length=1, max_length=5)
+    findings: list[SummaryFinding] = Field(default_factory=list, min_length=1, max_length=8)
 
     @classmethod
     def from_markdown(cls, text: str) -> Optional["TaskSummary"]:

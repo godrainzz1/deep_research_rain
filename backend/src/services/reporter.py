@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+import json, re
 
 from hello_agents import ToolAwareSimpleAgent
 
@@ -10,6 +10,20 @@ from models import SummaryState
 from config import Configuration
 from utils import strip_thinking_tokens
 from services.text_processing import strip_tool_calls
+
+
+# 报告级别去重：如果 LLM 重复输出了研究报告标题，只保留最后一份完整报告
+_REPORT_HEADING = re.compile(r"^(?:#{1,3}\s*)?(?:研究报告|最终报告|分析报告)", re.MULTILINE)
+
+
+def _dedup_report(text: str) -> str:
+    """Keep only the last report heading block, discarding earlier duplicates."""
+    if not text:
+        return text
+    matches = list(_REPORT_HEADING.finditer(text))
+    if len(matches) >= 2:
+        text = text[matches[-1].start():].strip()
+    return text
 
 
 class ReportingService:
@@ -35,16 +49,6 @@ class ReportingService:
                 f"- 来源概览：\n{sources_block}\n"
             )
 
-        note_references = []
-        for task in state.todo_items:
-            if task.note_id:
-                note_references.append(
-                    f"- 任务 {task.id}《{task.title}》：note_id={task.note_id}"
-                )
-
-        notes_section = "\n".join(note_references) if note_references else "- 暂无可用任务笔记"
-
-        read_template = json.dumps({"action": "read", "note_id": "<note_id>"}, ensure_ascii=False)
         create_conclusion_template = json.dumps(
             {
                 "action": "create",
@@ -57,11 +61,13 @@ class ReportingService:
         )
 
         prompt = (
-            f"研究主题：{state.research_topic}\n"
-            f"任务概览：\n{''.join(tasks_block)}\n"
-            f"可用任务笔记：\n{notes_section}\n"
-            f"请针对每条任务笔记使用格式：[TOOL_CALL:note:{read_template}] 读取内容，整合所有信息后撰写报告。\n"
-            f"如需输出汇总结论，可追加调用：[TOOL_CALL:note:{create_conclusion_template}] 保存报告要点。"
+            f"研究主题：{state.research_topic}\n\n"
+            f"以下已包含全部 {len(state.todo_items)} 项子任务的完整总结与来源信息，"
+            f"你无需再读取笔记，所有所需信息均已列在下方：\n\n"
+            f"{''.join(tasks_block)}\n"
+            f"请基于以上全部任务信息，整合撰写**一份**统一的研究报告"
+            f"（不要为每个任务单独生成报告，禁止重复输出研究报告标题）。\n"
+            f"如需保存最终报告要点，可调用：[TOOL_CALL:note:{create_conclusion_template}]。"
         )
 
         response = self._agent.run(prompt)
@@ -73,5 +79,7 @@ class ReportingService:
 
         report_text = strip_tool_calls(report_text).strip()
 
-        return report_text or "报告生成失败，请检查输入。"
+        # 后置去重：如果 LLM 仍然重复输出了报告标题，只保留最后一份
+        report_text = _dedup_report(report_text)
 
+        return report_text or "报告生成失败，请检查输入。"
