@@ -578,15 +578,16 @@ class DeepResearchAgent:
                 f"检索查询：{task.query}\n"
                 f"请记录任务概览、来源概览、任务总结"
             )
-
-            response = self.note_tool.run({
+            params = {
                 "action": "create",
                 "task_id": task.id,
                 "title": title,
                 "note_type": "task_state",
                 "tags": tags,
                 "content": content,
-            })
+            }
+
+            response = self.note_tool.run(params)
 
             note_id = self._extract_note_id_from_text(response)
             if note_id:
@@ -597,6 +598,9 @@ class DeepResearchAgent:
                 logger.info("Programmatic note created: task_id=%d note_id=%s", task.id, note_id)
             else:
                 logger.warning("Failed to extract note_id from create response: %s", response[:200])
+
+            # 通知前端：程序化 create 也可见
+            self._emit_tool_event("任务总结专家", "note", params, response)
 
     def _update_task_note(self, task: TodoItem) -> None:
         """程序化更新笔记 — 将最终任务总结写入已有笔记。"""
@@ -612,19 +616,39 @@ class DeepResearchAgent:
                 f"{task.summary}\n\n"
                 f"### 来源概览\n\n{task.sources_summary or '暂无来源'}"
             )
+            params = {
+                "action": "update",
+                "note_id": task.note_id,
+                "task_id": task.id,
+                "title": f"任务 {task.id}: {task.title}",
+                "note_type": "task_state",
+                "tags": ["deep_research", f"task_{task.id}"],
+                "content": content,
+            }
             try:
-                self.note_tool.run({
-                    "action": "update",
-                    "note_id": task.note_id,
-                    "task_id": task.id,
-                    "title": f"任务 {task.id}: {task.title}",
-                    "note_type": "task_state",
-                    "tags": ["deep_research", f"task_{task.id}"],
-                    "content": content,
-                })
+                response = self.note_tool.run(params)
                 logger.info("Programmatic note updated: task_id=%d note_id=%s", task.id, task.note_id)
+                # 通知前端：程序化 update 也可见
+                self._emit_tool_event("任务总结专家", "note", params, response)
             except Exception as exc:
                 logger.warning("Failed to update note %s: %s", task.note_id, exc)
+
+    def _emit_tool_event(
+        self, agent_name: str, tool_name: str,
+        params: dict, response: str,
+    ) -> None:
+        """手动向 _tool_tracker 推送一条工具调用事件，让前端可见。"""
+        import json as _json
+        try:
+            self._tool_tracker.record({
+                "agent_name": agent_name,
+                "tool_name": tool_name,
+                "raw_parameters": _json.dumps(params, ensure_ascii=False),
+                "parsed_parameters": params,
+                "result": response,
+            })
+        except Exception:
+            pass  # 非关键路径，静默忽略
 
     def _drain_tool_events(
         self,
